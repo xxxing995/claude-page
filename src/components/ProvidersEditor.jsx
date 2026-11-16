@@ -4,11 +4,12 @@ import { listProviders, discoverModels, createProvider, updateProvider, deletePr
 // 和后端一致：去掉结尾的 / 和 /v1，用来判断地址有没有变
 const norm = (u) => (u || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '')
 
-export default function ProvidersEditor({ models, accessCode, onChanged }) {
+export default function ProvidersEditor({ models, accessCode, onChanged, autoAdd = false }) {
   const [providers, setProviders] = useState([])
   const [listError, setListError] = useState('')
 
-  const [form, setForm] = useState(null) // { id?, name, base_url, api_key }
+  // autoAdd：从对话页点“添加 API”进来时，直接展开新增表单
+  const [form, setForm] = useState(autoAdd ? { name: '', base_url: '', api_key: '' } : null) // { id?, name, base_url, api_key }
   const [rows, setRows] = useState(null) // 读取到的模型：[{ up, label, checked, missing? }]
   const [defaultUp, setDefaultUp] = useState(null)
   const [connected, setConnected] = useState(false)
@@ -154,6 +155,7 @@ export default function ProvidersEditor({ models, accessCode, onChanged }) {
           <div className="model-row-main">
             <div className="model-row-title">
               <span>{p.name}</span>
+              <span className="tag">id {p.id}</span>
               <span className="tag">密钥已保存</span>
             </div>
             <div className="model-row-sub">{p.base_url}</div>

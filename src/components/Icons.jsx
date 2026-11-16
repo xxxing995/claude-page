@@ -82,3 +82,25 @@ export const StopIcon = ({ size = 18 }) => (
     <rect x="6" y="6" width="12" height="12" rx="2.5" />
   </svg>
 )
+
+export const DocIcon = ({ size = 19 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M6 3.5h7.5L19 9v11.5H6z" />
+    <path d="M13.5 3.5V9H19M9.5 13h6M9.5 16.5h4" />
+  </svg>
+)
+
+export const CheckSquareIcon = ({ size = 19 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <rect x="4" y="4" width="16" height="16" rx="4" />
+    <path d="m8.5 12 2.6 2.6 4.6-5.2" />
+  </svg>
+)
+
+export const MoreIcon = ({ size = 19 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <circle cx="12" cy="5.5" r="1.5" />
+    <circle cx="12" cy="12" r="1.5" />
+    <circle cx="12" cy="18.5" r="1.5" />
+  </svg>
+)

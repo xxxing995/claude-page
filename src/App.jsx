@@ -3,42 +3,82 @@ import Splash from './components/Splash.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import ChatView from './components/ChatView.jsx'
 import Settings from './components/Settings.jsx'
-import { useSettings, resolveSrc } from './hooks/useSettings.js'
-import { INITIAL_CHATS, INITIAL_MESSAGES } from './data.js'
-import { streamChat, deleteMessage, retractRound, listModels } from './api.js'
-import Home from './components/Home.jsx'
-import Placeholder from './components/Placeholder.jsx'
+import Panel from './components/Panel.jsx'
+import { useSettings, resolveSrc, sidebarAvatarSrc, profileAvatarSrc } from './hooks/useSettings.js'
+import { providerIconSrc } from './providerIcon.js'
+import {
+  streamChat,
+  deleteMessage,
+  deleteSession,
+  retractRound,
+  listModels,
+  listSessions,
+  listMessages,
+  listProviders,
+} from './api.js'
+
+const SHANGHAI = 'Asia/Shanghai'
+const dateKey = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: SHANGHAI }).format(d)
+
+// 侧栏分组：今天 / 昨天 / 更早
+function groupLabel(iso) {
+  if (!iso) return '更早'
+  const key = dateKey(new Date(iso))
+  const now = new Date()
+  if (key === dateKey(now)) return '今天'
+  if (key === dateKey(new Date(now.getTime() - 86400000))) return '昨天'
+  return '更早'
+}
+
+// 两个时间取较晚的（ISO 字符串可以直接比较）；都没有就返回 null
+const later = (a, b) => (b && (!a || b > a) ? b : a)
+
+// 数据库会话 -> 侧栏用的对话对象
+const toChat = (s) => ({
+  id: 's' + s.id,
+  sessionId: s.id,
+  title: s.name || '新的对话',
+  group: groupLabel(s.updated_at),
+  updatedAt: s.updated_at || null,
+})
+
+// 数据库消息 -> 界面用的消息对象
+const toMessage = (r) => ({
+  id: 'm' + r.id,
+  role: r.role,
+  text: r.content || '',
+  reasoning: r.reasoning_content || '',
+  dbId: r.id,
+  stats: {
+    model: r.model,
+    first_token_ms: r.first_token_ms,
+    total_ms: r.total_ms,
+    prompt_tokens: r.prompt_tokens,
+    completion_tokens: r.completion_tokens,
+    total_tokens: r.total_tokens,
+    finish_reason: r.finish_reason,
+  },
+})
 
 export default function App() {
   const { settings, update, reset } = useSettings()
-    useEffect(() => {
+  useEffect(() => {
     document.documentElement.dataset.theme = settings.theme || 'rose'
   }, [settings.theme])
-
-    // 页面切换：home | chat | memory | dream | moments
-  const [view, setView] = useState(() => window.history.state?.v || 'home')
-  const go = useCallback((v) => {
-    setView(v)
-    window.history.pushState({ v }, '')
-  }, [])
-  const goHome = () => (window.history.state?.v ? window.history.back() : setView('home'))
-  useEffect(() => {
-    const onPop = (e) => setView(e.state?.v || 'home')
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
-  }, [])
 
   // 开场动画
   const [splash, setSplash] = useState(settings.splashEnabled ? 1 : 0)
   const endSplash = useCallback(() => setSplash(0), [])
 
   // 对话
-  const [chats, setChats] = useState(INITIAL_CHATS)
-  const [messages, setMessages] = useState(INITIAL_MESSAGES)
-  const [activeId, setActiveId] = useState('c1')
-  const [sidebarOpen, setSidebarOpen] = useState(false) // 手机：抽屉
-  const [collapsed, setCollapsed] = useState(false) // 电脑：收起
+  const [chats, setChats] = useState([])
+  const [messages, setMessages] = useState({})
+  const [activeId, setActiveId] = useState(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false) // 窄屏：抽屉
+  const [collapsed, setCollapsed] = useState(false) // 桌面：收起常驻侧栏
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [addProviderIntent, setAddProviderIntent] = useState(false) // 打开设置时直接进入“添加接口”表单
+  const [panel, setPanel] = useState(null) // 占位面板：{ kind, title }
 
   // 每个对话的状态：'' 空闲 | 'connecting' | 'streaming' | 'retracting'
   const [pending, setPending] = useState({})
@@ -58,26 +98,114 @@ export default function App() {
     }
   }, [settings.accessCode])
 
+  // 接口列表：侧栏接口条和接口图标都从这里取
+  const [providers, setProviders] = useState([])
+  const reloadProviders = useCallback(async () => {
+    try {
+      setProviders(await listProviders(settings.accessCode))
+    } catch {
+      setProviders([])
+    }
+  }, [settings.accessCode])
+
+  // 模型选中态放在这里：输入区选择器和侧栏接口条共用同一份
+  const [modelKey, setModelKey] = useState(() => {
+    try {
+      return localStorage.getItem('our-home:model')
+    } catch {
+      return null
+    }
+  })
+  const model = models.find((m) => m.model_key === modelKey) || models.find((m) => m.is_default) || models[0]
+  const pickModel = useCallback((key) => {
+    setModelKey(key)
+    try {
+      localStorage.setItem('our-home:model', key)
+    } catch {
+      // 存不了就算了，只是记住偏好
+    }
+  }, [])
+
+  // 会话读取：已经读过的历史按会话缓存，切换回来不再请求
+  const loadedSessions = useRef(new Set())
+  const loadingSessions = useRef(new Set())
+
+  const reloadSessions = useCallback(async () => {
+    try {
+      const rows = await listSessions(settings.accessCode)
+      setChats((prev) => {
+        const local = prev.filter((c) => !c.sessionId) // 还没发过消息的新对话
+        const bySession = new Map(prev.filter((c) => c.sessionId).map((c) => [c.sessionId, c]))
+        const fromDb = rows.map((s) => {
+          const existing = bySession.get(s.id)
+          if (!existing) return toChat(s)
+          bySession.delete(s.id)
+          return { ...existing, title: s.name || existing.title, group: groupLabel(s.updated_at), updatedAt: later(existing.updatedAt, s.updated_at) }
+        })
+        return [...local, ...fromDb, ...bySession.values()]
+      })
+    } catch (err) {
+      console.log('读取会话列表失败', err.message)
+    }
+  }, [settings.accessCode])
+
+  const loadMessages = useCallback(
+    async (chat) => {
+      const key = chat?.sessionId
+      if (!key || loadedSessions.current.has(key) || loadingSessions.current.has(key)) return
+      loadingSessions.current.add(key)
+      try {
+        const res = await listMessages(key, settings.accessCode)
+        if (runs.current[chat.id]) return // 生成中先不覆盖，等结束后再读
+        // 兼容旧后端（直接返回数组）和新后端（{ updated_at, messages }）
+        const rows = Array.isArray(res) ? res : res.messages || []
+        const dbTime = Array.isArray(res) ? null : res.updated_at || null
+        if (dbTime) {
+          setChats((cs) => cs.map((c) => (c.id === chat.id ? { ...c, updatedAt: later(c.updatedAt, dbTime) } : c)))
+        }
+        loadedSessions.current.add(key)
+        setMessages((m) => ({ ...m, [chat.id]: rows.map(toMessage) }))
+      } catch (err) {
+        console.log('读取历史消息失败', err.message)
+      } finally {
+        loadingSessions.current.delete(key)
+      }
+    },
+    [settings.accessCode],
+  )
+
   // 打开页面、口令变化时读取（稍等一下，避免输入口令时每敲一个字就请求一次）
   useEffect(() => {
-    const t = setTimeout(reloadModels, 400)
+    const t = setTimeout(() => {
+      reloadModels()
+      reloadProviders()
+      reloadSessions()
+    }, 400)
     return () => clearTimeout(t)
-  }, [reloadModels])
+  }, [reloadModels, reloadProviders, reloadSessions])
 
-  const active = chats.find((c) => c.id === activeId)
+  const active = chats.find((c) => c.id === activeId) || chats[0]
+
+  // 选中数据库会话时按需读取历史消息
+  useEffect(() => {
+    if (!active?.sessionId) return
+    if (pending[active.id] || runs.current[active.id]) return
+    loadMessages(active)
+  }, [active, pending, loadMessages])
 
   const toggleSidebar = () => {
-    if (window.matchMedia('(max-width: 719px)').matches) setSidebarOpen((o) => !o)
+    if (window.matchMedia('(max-width: 1023px)').matches) setSidebarOpen((o) => !o)
     else setCollapsed((c) => !c)
   }
 
-  const newChat = () => {
+  const newChat = useCallback(() => {
     const id = 'c' + Date.now()
     setChats((cs) => [{ id, group: '今天', title: '新的对话' }, ...cs])
     setMessages((m) => ({ ...m, [id]: [] }))
     setActiveId(id)
     setSidebarOpen(false)
-  }
+    return id
+  }, [])
 
   // ---------- 流式生成（发送和重新生成共用） ----------
   const runStream = async (run, { sessionId, model, content, regenerateId, onFail }) => {
@@ -113,6 +241,8 @@ export default function App() {
       if (!run.cancelled) onFail(err, (fn) => update(assistantId, fn))
     } finally {
       if (runs.current[chatId] === run) {
+        // 本来就已经有完整历史（或本来就是新会话）时，本地状态就是完整的，不用再读一次
+        if (run.sessionId && run.wasLoaded) loadedSessions.current.add(run.sessionId)
         delete runs.current[chatId]
         setStatus(chatId, '')
       }
@@ -121,10 +251,17 @@ export default function App() {
 
   // 发送
   const send = (text, modelId) => {
-    const chatId = activeId
-    const chat = chats.find((c) => c.id === chatId)
+    // 还没有任何对话时（开场白状态）直接新建一个再发
+    let chatId = active?.id
+    let chat = active
+    if (!chatId) {
+      chatId = newChat()
+      chat = null
+    }
     const userLocalId = crypto.randomUUID()
     const assistantId = crypto.randomUUID()
+    // 新会话（还没有 sessionId）本地就是全部内容；老会话看历史是否已经读过
+    const wasLoaded = chat?.sessionId ? loadedSessions.current.has(chat.sessionId) : true
 
     setMessages((m) => ({
       ...m,
@@ -139,7 +276,7 @@ export default function App() {
     )
 
     runStream(
-      { kind: 'send', chatId, userLocalId, assistantId, text, sessionId: chat?.sessionId, prevTitle: chat?.title },
+      { kind: 'send', chatId, userLocalId, assistantId, text, sessionId: chat?.sessionId, prevTitle: chat?.title, wasLoaded },
       {
         sessionId: chat?.sessionId,
         model: modelId,
@@ -152,10 +289,11 @@ export default function App() {
 
   // 重新生成最后一条回复
   const regenerate = (old, modelId) => {
-    const chatId = activeId
-    const chat = chats.find((c) => c.id === chatId)
-    if (!chat?.sessionId || !old.dbId || pending[chatId]) return
+    const chatId = active?.id
+    const chat = active
+    if (!chatId || !chat?.sessionId || !old.dbId || pending[chatId]) return
     const assistantId = crypto.randomUUID()
+    const wasLoaded = loadedSessions.current.has(chat.sessionId)
 
     setMessages((m) => ({
       ...m,
@@ -165,7 +303,7 @@ export default function App() {
     }))
 
     runStream(
-      { kind: 'regen', chatId, assistantId, old, sessionId: chat.sessionId },
+      { kind: 'regen', chatId, assistantId, old, sessionId: chat.sessionId, wasLoaded },
       {
         sessionId: chat.sessionId,
         model: modelId,
@@ -177,7 +315,8 @@ export default function App() {
 
   // 停止并撤回。返回要放回输入框的文字（重新生成被停止时返回 null）
   const stop = () => {
-    const chatId = activeId
+    const chatId = active?.id
+    if (!chatId) return null
     const run = runs.current[chatId]
     if (!run) return null
     run.cancelled = true
@@ -192,7 +331,16 @@ export default function App() {
       return null
     }
 
-    edit((list) => list.filter((x) => x.id !== run.userLocalId && x.id !== run.assistantId))
+    edit((list) => {
+      const next = list.filter((x) => x.id !== run.userLocalId)
+      return next
+        .map((x) => {
+          if (x.id !== run.assistantId) return x
+          if (!x.text && !x.reasoning) return null // 还没吐出内容，不留空气泡
+          return { ...x, streaming: false, note: '已停止，未保存' }
+        })
+        .filter(Boolean)
+    })
     setChats((cs) =>
       cs.map((c) => (c.id === chatId && run.prevTitle === '新的对话' ? { ...c, title: run.prevTitle } : c)),
     )
@@ -202,11 +350,34 @@ export default function App() {
       retractRound(run.sessionId, run.userDbId, settings.accessCode)
         .then((res) => {
           if (res.session_deleted) {
-            setChats((cs) => cs.map((c) => (c.id === chatId ? { ...c, sessionId: undefined } : c)))
+            // 后端已经把空会话删了：缓存清掉，侧栏同步移除，不等下一次刷新
+            // activeId 为空时 active 默认是列表第一个，也算“正在看”
+            const isShowing = !activeId || chatId === activeId
+            loadedSessions.current.delete(run.sessionId)
+            setChats((cs) => {
+              // 正在看这个对话时，把刚保留的“已停止”内容留在界面上：
+              // 会话已从数据库删除，这里降级成本地的新对话（不再关联 sessionId）
+              if (isShowing) {
+                return cs.map((c) =>
+                  c.id === chatId ? { id: chatId, group: '今天', title: '新的对话' } : c,
+                )
+              }
+              return cs.filter((c) => c.id !== chatId)
+            })
+            if (!isShowing) {
+              setMessages((m) => {
+                const next = { ...m }
+                delete next[chatId]
+                return next
+              })
+            }
           }
         })
         .catch((err) => window.alert(`数据库撤回失败：${err.message}`))
-        .finally(() => setStatus(chatId, ''))
+        .finally(() => {
+          loadedSessions.current.delete(run.sessionId) // 撤回改过数据库，缓存作废
+          setStatus(chatId, '')
+        })
     } else {
       setStatus(chatId, '')
     }
@@ -216,7 +387,8 @@ export default function App() {
   // 删除一条消息：先改界面，再请求后端，失败就恢复
   const removeMessage = async (msg) => {
     if (!window.confirm('确定删除这条回复吗？')) return
-    const chatId = activeId
+    const chatId = active?.id
+    if (!chatId) return
     const index = (messages[chatId] || []).findIndex((x) => x.id === msg.id)
 
     setMessages((m) => ({ ...m, [chatId]: (m[chatId] || []).filter((x) => x.id !== msg.id) }))
@@ -224,6 +396,8 @@ export default function App() {
 
     try {
       await deleteMessage(msg.dbId, settings.accessCode)
+      const chat = chats.find((c) => c.id === chatId)
+      if (chat?.sessionId) loadedSessions.current.delete(chat.sessionId) // 数据库变了，下次切回来重新读
     } catch (err) {
       setMessages((m) => {
         const list = [...(m[chatId] || [])]
@@ -234,44 +408,95 @@ export default function App() {
     }
   }
 
+  // 删除当前会话：数据库删成功后再从界面移除
+  const deleteChat = async () => {
+    const chat = active
+    if (!chat) return
+    if (!window.confirm('确定删除这个对话和里面的全部消息吗？')) return
+    if (chat.sessionId) {
+      try {
+        await deleteSession(chat.sessionId, settings.accessCode)
+      } catch (err) {
+        window.alert(`删除对话失败：${err.message}`)
+        return
+      }
+      loadedSessions.current.delete(chat.sessionId)
+    }
+    setChats((cs) => cs.filter((c) => c.id !== chat.id))
+    setMessages((m) => {
+      const next = { ...m }
+      delete next[chat.id]
+      return next
+    })
+  }
+
+  // 三处图片各读各的固定文件；上传的 base64 作为统一覆盖
+  const userAvatarSrc = sidebarAvatarSrc(settings)
+  const profileSrc = profileAvatarSrc(settings)
+  // 助手头像直接用当前模型所属接口的图标
+  const providerId = model?.provider_id ?? null
+  const centerProviderId = providers.some((p) => p.id === providerId) ? providerId : null
+  const botAvatarSrc = providerIconSrc(providerId)
+
   return (
     <>
-      {view === 'home' && <Home settings={settings} onGo={go} onOpenSettings={() => setSettingsOpen(true)} />}
-      {view !== 'home' && view !== 'chat' && <Placeholder view={view} onBack={goHome} />}
-      <div className={'app' + (collapsed ? ' sidebar-collapsed' : '')} hidden={view !== 'chat'}>
+      <div className={'app' + (collapsed ? ' sidebar-collapsed' : '')}>
         <Sidebar
           title={settings.splashTitle || '我们的家'}
+          avatarSrc={userAvatarSrc}
           chats={chats}
-          activeId={activeId}
+          activeId={active?.id}
           open={sidebarOpen}
+          providers={providers}
+          centerProviderId={centerProviderId}
           onPick={(id) => {
             setActiveId(id)
             setSidebarOpen(false)
           }}
           onNew={newChat}
-          onHome={() => {
-            setSidebarOpen(false)
-            goHome()
-          }}
           onOpenSettings={() => {
             setSettingsOpen(true)
             setSidebarOpen(false)
           }}
+          onDeleteChat={active ? deleteChat : null}
+          onOpenModule={(kind, title) => {
+            setPanel({ kind, title })
+            setSidebarOpen(false)
+          }}
+          onClose={() => setSidebarOpen(false)}
         />
         {sidebarOpen && <div className="scrim" onClick={() => setSidebarOpen(false)} />}
         <ChatView
-          title={active?.title || ''}
-          messages={messages[activeId] || []}
-          status={pending[activeId] || ''}
+          messages={messages[active?.id] || []}
+          status={pending[active?.id] || ''}
+          lastUpdated={active?.updatedAt}
           models={models}
-          onOpenSettings={() => setSettingsOpen(true)}
+          model={model}
+          onPickModel={pickModel}
+          botAvatarSrc={botAvatarSrc}
+          userName={settings.userName}
+          hasProviders={providers.length > 0 || models.length > 0}
+          onAddProvider={() => {
+            setAddProviderIntent(true)
+            setSettingsOpen(true)
+          }}
           onSend={send}
           onStop={stop}
           onRegenerate={regenerate}
           onDelete={removeMessage}
           onOpenSidebar={toggleSidebar}
+          onOpenPanel={setPanel}
         />
       </div>
+
+      {panel && (
+        <Panel
+          panel={panel}
+          avatarSrc={profileSrc}
+          settings={settings}
+          onClose={() => setPanel(null)}
+        />
+      )}
 
       {settingsOpen && (
         <Settings
@@ -280,8 +505,16 @@ export default function App() {
           reset={reset}
           models={models}
           modelsError={modelsError}
-          onModelsChanged={reloadModels}
-          onClose={() => setSettingsOpen(false)}
+          onModelsChanged={() => {
+            reloadModels()
+            reloadProviders()
+          }}
+          initialTab={addProviderIntent ? 'api' : 'basic'}
+          autoAddProvider={addProviderIntent}
+          onClose={() => {
+            setSettingsOpen(false)
+            setAddProviderIntent(false)
+          }}
           onPreview={() => setSplash((n) => n + 1)}
         />
       )}

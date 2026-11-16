@@ -89,6 +89,8 @@ async function call(method, path, body, accessCode) {
 }
 
 export const listModels = (accessCode) => call('GET', '/api/models', null, accessCode)
+export const listSessions = (accessCode) => call('GET', '/api/sessions', null, accessCode)
+export const listMessages = (sessionId, accessCode) => call('GET', `/api/sessions/${sessionId}/messages`, null, accessCode)
 export const listProviders = (accessCode) => call('GET', '/api/providers', null, accessCode)
 export const discoverModels = (data, accessCode) => call('POST', '/api/providers/discover', data, accessCode)
 export const createProvider = (data, accessCode) => call('POST', '/api/providers', data, accessCode)

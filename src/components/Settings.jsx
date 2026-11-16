@@ -26,8 +26,18 @@ function Slider({ label, value, min, max, step, unit, onChange }) {
   )
 }
 
-export default function Settings({ settings, update, reset, models, onModelsChanged, onClose, onPreview }) {
-  const [tab, setTab] = useState('basic') // 'basic' | 'api'
+export default function Settings({
+  settings,
+  update,
+  reset,
+  models,
+  onModelsChanged,
+  onClose,
+  onPreview,
+  initialTab = 'basic',
+  autoAddProvider = false,
+}) {
+  const [tab, setTab] = useState(initialTab)
   const fileRef = useRef(null)
   const [error, setError] = useState('')
   const [imgOk, setImgOk] = useState(true)
@@ -117,12 +127,12 @@ export default function Settings({ settings, update, reset, models, onModelsChan
                   id="img-path"
                   className="text-input"
                   type="text"
-                  placeholder="/logo.png 或 https://…"
+                  placeholder="/images/splash.png 或 https://…"
                   value={settings.imagePath}
                   onChange={(e) => update({ imagePath: e.target.value, imageData: '', imageName: '' })}
                 />
                 <div className="hint">
-                  把图片放进项目的 <code>public/</code> 文件夹，再填 <code>/文件名</code> 即可。
+                  留空时读 <code>public/images/splash.png</code>；这里只影响开场图，侧栏和个人主页头像各读自己的固定文件。
                 </div>
                 {diskPath && (
                   <div className="warn">
@@ -185,10 +195,10 @@ export default function Settings({ settings, update, reset, models, onModelsChan
             </section>
 
                         <section className="section">
-              <div className="section-title">首页</div>
+              <div className="section-title">开场白与个人主页</div>
               <div className="field">
                 <label htmlFor="user-name" className="field-head">
-                  <span>首页称呼</span>
+                  <span>称呼</span>
                 </label>
                 <input
                   id="user-name"
@@ -236,7 +246,12 @@ export default function Settings({ settings, update, reset, models, onModelsChan
         )}
 
         {tab === 'api' && (
-          <ProvidersEditor models={models} accessCode={settings.accessCode} onChanged={onModelsChanged} />
+          <ProvidersEditor
+            models={models}
+            accessCode={settings.accessCode}
+            onChanged={onModelsChanged}
+            autoAdd={autoAddProvider}
+          />
         )}
                 {tab === 'style' && (
           <section className="section">
