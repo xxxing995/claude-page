@@ -1,16 +1,50 @@
 import { useEffect, useRef, useState } from 'react'
-import { MODELS } from '../data.js'
-import { HouseIcon, ChevronIcon, CheckIcon, ClipIcon, SendIcon, MenuIcon } from './Icons.jsx'
+import { textToBlocks } from '../api.js'
+import {
+  HouseIcon,
+  ChevronIcon,
+  CheckIcon,
+  ClipIcon,
+  SendIcon,
+  MenuIcon,
+  TrashIcon,
+  RefreshIcon,
+  StopIcon,
+} from './Icons.jsx'
 
-const TODAY = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date())
+const TODAY = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  month: 'long',
+  day: 'numeric',
+  weekday: 'short',
+}).format(new Date())
 
-function AssistantMessage({ blocks }) {
+function Stats({ s }) {
+  if (!s) return null
+  const sec = (ms) => (ms / 1000).toFixed(1)
+  const parts = []
+  if (s.first_token_ms != null) parts.push(`首字 ${sec(s.first_token_ms)} 秒`)
+  if (s.total_ms != null) parts.push(`用时 ${sec(s.total_ms)} 秒`)
+  if (s.completion_tokens != null) parts.push(`${s.completion_tokens} tokens`)
+  return parts.length ? <div className="msg-stats">{parts.join(' · ')}</div> : null
+}
+
+function AssistantMessage({ m, isLast, busy, onRegenerate, onDelete }) {
+  const blocks = m.blocks ?? textToBlocks(m.text || '')
+  const waiting = m.streaming && !m.text && !m.reasoning
   return (
     <div className="msg-assistant">
       <div className="avatar">
         <HouseIcon size={18} />
       </div>
       <div className="msg-body">
+        {m.reasoning && (
+          <details className="reasoning">
+            <summary>思考过程</summary>
+            <div>{m.reasoning}</div>
+          </details>
+        )}
+        {waiting && <p className="typing">正在想…</p>}
         {blocks.map((b, i) =>
           b.type === 'list' ? (
             <div className="list-card" key={i}>
@@ -25,19 +59,55 @@ function AssistantMessage({ blocks }) {
             <p key={i}>{b.text}</p>
           ),
         )}
+        {!m.streaming && (
+          <div className="msg-meta">
+            <Stats s={m.stats} />
+            <button type="button" className="act-btn" disabled={busy} onClick={() => onDelete(m)}>
+              <TrashIcon /> 删除
+            </button>
+            {isLast && m.dbId && (
+              <button type="button" className="act-btn" disabled={busy} onClick={() => onRegenerate(m)}>
+                <RefreshIcon /> 重新生成
+              </button>
+            )}
+          </div>
+        )}
+        {m.note && <div className="msg-stats">{m.note}</div>}
       </div>
     </div>
   )
 }
 
-export default function ChatView({ title, messages, onSend, onOpenSidebar }) {
-  const [modelId, setModelId] = useState('sonnet')
+export default function ChatView({
+  title,
+  messages,
+  status,
+  models,
+  onOpenSettings,
+  onSend,
+  onStop,
+  onRegenerate,
+  onDelete,
+  onOpenSidebar,
+}) {
+  const busy = !!status
+
+  // 模型：优先用上次选的；没有或已被删除，就用标记为默认的；再没有就用第一个
+  const [savedId, setSavedId] = useState(() => {
+    try {
+      return localStorage.getItem('our-home:model')
+    } catch {
+      return null
+    }
+  })
+  const model = models.find((m) => m.model_key === savedId) || models.find((m) => m.is_default) || models[0]
+  const modelId = model?.model_key
+
   const [menuOpen, setMenuOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const menuRef = useRef(null)
   const taRef = useRef(null)
   const endRef = useRef(null)
-  const model = MODELS.find((m) => m.id === modelId)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -53,14 +123,35 @@ export default function ChatView({ title, messages, onSend, onOpenSidebar }) {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages])
+  }, [messages, status])
+
+  const pickModel = (key) => {
+    setSavedId(key)
+    setMenuOpen(false)
+    try {
+      localStorage.setItem('our-home:model', key)
+    } catch {}
+  }
 
   const submit = () => {
     const text = draft.trim()
-    if (!text) return
+    if (!text || busy || !model) return
     onSend(text, modelId)
     setDraft('')
     if (taRef.current) taRef.current.style.height = 'auto'
+  }
+
+  const handleStop = () => {
+    const text = onStop()
+    if (!text) return
+    setDraft((d) => (d ? text + '\n' + d : text)) // 撤回的文字放回输入框
+    requestAnimationFrame(() => {
+      const el = taRef.current
+      if (!el) return
+      el.style.height = 'auto'
+      el.style.height = Math.min(el.scrollHeight, 180) + 'px'
+      el.focus()
+    })
   }
 
   const onKeyDown = (e) => {
@@ -93,31 +184,28 @@ export default function ChatView({ title, messages, onSend, onOpenSidebar }) {
             className="model-btn"
             aria-haspopup="listbox"
             aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((v) => !v)}
+            onClick={() => (model ? setMenuOpen((v) => !v) : onOpenSettings())}
           >
             <span className="dot" />
-            <span>{model.name}</span>
+            <span>{model ? model.label : '添加模型'}</span>
             <ChevronIcon />
           </button>
           {menuOpen && (
             <div className="model-menu" role="listbox" aria-label="选择模型">
-              {MODELS.map((m) => (
+              {models.map((m) => (
                 <button
                   type="button"
                   role="option"
-                  aria-selected={m.id === modelId}
+                  aria-selected={m.model_key === modelId}
                   key={m.id}
-                  className={'model-item' + (m.id === modelId ? ' selected' : '')}
-                  onClick={() => {
-                    setModelId(m.id)
-                    setMenuOpen(false)
-                  }}
+                  className={'model-item' + (m.model_key === modelId ? ' selected' : '')}
+                  onClick={() => pickModel(m.model_key)}
                 >
                   <span className="model-text">
-                    <span className="model-name">{m.name}</span>
-                    <span className="model-desc">{m.desc}</span>
+                    <span className="model-name">{m.label}</span>
+                    <span className="model-desc">{m.description}</span>
                   </span>
-                  {m.id === modelId && <CheckIcon />}
+                  {m.model_key === modelId && <CheckIcon />}
                 </button>
               ))}
             </div>
@@ -145,7 +233,14 @@ export default function ChatView({ title, messages, onSend, onOpenSidebar }) {
                     {m.text}
                   </div>
                 ) : (
-                  <AssistantMessage key={m.id} blocks={m.blocks} />
+                  <AssistantMessage
+                    key={m.id}
+                    m={m}
+                    isLast={m.id === messages[messages.length - 1]?.id}
+                    busy={busy}
+                    onRegenerate={(msg) => onRegenerate(msg, modelId)}
+                    onDelete={onDelete}
+                  />
                 ),
               )}
             </>
@@ -169,9 +264,21 @@ export default function ChatView({ title, messages, onSend, onOpenSidebar }) {
               onChange={onInput}
               onKeyDown={onKeyDown}
             />
-            <button type="button" className="send-btn" aria-label="发送" onClick={submit}>
-              <SendIcon />
-            </button>
+            {status === 'connecting' || status === 'streaming' ? (
+              <button
+                type="button"
+                className="send-btn stop"
+                aria-label="停止并撤回"
+                disabled={status === 'connecting'}
+                onClick={handleStop}
+              >
+                <StopIcon />
+              </button>
+            ) : (
+              <button type="button" className="send-btn" aria-label="发送" disabled={busy || !model} onClick={submit}>
+                <SendIcon />
+              </button>
+            )}
           </div>
           <div className="footnote">回答可能会有出入，重要的事记得再确认一下。</div>
         </div>

@@ -11,6 +11,7 @@ export const DEFAULTS = {
   holdSeconds: 1, // 图标完整显示的停留时间
   fadeSeconds: 2, // 渐隐时间（1–3 秒）
   iconSize: 120,
+  accessCode: '',
 }
 
 function load() {
@@ -33,7 +34,7 @@ export function useSettings() {
   }, [settings])
 
   const update = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), [])
-  const reset = useCallback(() => setSettings({ ...DEFAULTS }), [])
+  const reset = useCallback(() => setSettings((s) => ({ ...DEFAULTS, accessCode: s.accessCode })), [])
 
   return { settings, update, reset }
 }
