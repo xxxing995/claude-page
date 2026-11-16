@@ -13,6 +13,8 @@ export const DEFAULTS = {
   iconSize: 120,
   accessCode: '',
   theme: 'rose',
+  userName: '',
+  startDate: '',
 }
 
 export const THEMES = [
@@ -40,7 +42,7 @@ export function useSettings() {
   }, [settings])
 
   const update = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), [])
-  const reset = useCallback(() => setSettings((s) => ({ ...DEFAULTS, accessCode: s.accessCode, theme: s.theme })), [])
+  const reset = useCallback(() => setSettings((s) => ({ ...DEFAULTS, accessCode: s.accessCode, theme: s.theme, userName: s.userName, startDate: s.startDate })), [])
 
   return { settings, update, reset }
 }

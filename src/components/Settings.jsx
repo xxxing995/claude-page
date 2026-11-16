@@ -184,6 +184,36 @@ export default function Settings({ settings, update, reset, models, onModelsChan
               />
             </section>
 
+                        <section className="section">
+              <div className="section-title">首页</div>
+              <div className="field">
+                <label htmlFor="user-name" className="field-head">
+                  <span>首页称呼</span>
+                </label>
+                <input
+                  id="user-name"
+                  className="text-input"
+                  type="text"
+                  maxLength={12}
+                  placeholder="例如：水水"
+                  value={settings.userName}
+                  onChange={(e) => update({ userName: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="start-date" className="field-head">
+                  <span>在一起的日期</span>
+                </label>
+                <input
+                  id="start-date"
+                  className="text-input"
+                  type="date"
+                  value={settings.startDate}
+                  onChange={(e) => update({ startDate: e.target.value })}
+                />
+              </div>
+            </section>
+            
             <section className="section">
               <div className="section-title">安全</div>
               <div className="field">

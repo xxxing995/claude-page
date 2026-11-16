@@ -6,12 +6,27 @@ import Settings from './components/Settings.jsx'
 import { useSettings, resolveSrc } from './hooks/useSettings.js'
 import { INITIAL_CHATS, INITIAL_MESSAGES } from './data.js'
 import { streamChat, deleteMessage, retractRound, listModels } from './api.js'
+import Home from './components/Home.jsx'
+import Placeholder from './components/Placeholder.jsx'
 
 export default function App() {
   const { settings, update, reset } = useSettings()
     useEffect(() => {
     document.documentElement.dataset.theme = settings.theme || 'rose'
   }, [settings.theme])
+
+    // 页面切换：home | chat | memory | dream | moments
+  const [view, setView] = useState(() => window.history.state?.v || 'home')
+  const go = useCallback((v) => {
+    setView(v)
+    window.history.pushState({ v }, '')
+  }, [])
+  const goHome = () => (window.history.state?.v ? window.history.back() : setView('home'))
+  useEffect(() => {
+    const onPop = (e) => setView(e.state?.v || 'home')
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   // 开场动画
   const [splash, setSplash] = useState(settings.splashEnabled ? 1 : 0)
@@ -221,7 +236,9 @@ export default function App() {
 
   return (
     <>
-      <div className={'app' + (collapsed ? ' sidebar-collapsed' : '')}>
+      {view === 'home' && <Home settings={settings} onGo={go} onOpenSettings={() => setSettingsOpen(true)} />}
+      {view !== 'home' && view !== 'chat' && <Placeholder view={view} onBack={goHome} />}
+      <div className={'app' + (collapsed ? ' sidebar-collapsed' : '')} hidden={view !== 'chat'}>
         <Sidebar
           title={settings.splashTitle || '我们的家'}
           chats={chats}
@@ -232,6 +249,10 @@ export default function App() {
             setSidebarOpen(false)
           }}
           onNew={newChat}
+          onHome={() => {
+            setSidebarOpen(false)
+            goHome()
+          }}
           onOpenSettings={() => {
             setSettingsOpen(true)
             setSidebarOpen(false)

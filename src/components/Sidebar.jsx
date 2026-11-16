@@ -1,14 +1,14 @@
 import { HouseIcon, PlusIcon, GearIcon } from './Icons.jsx'
 
-export default function Sidebar({ chats, activeId, open, onPick, onNew, onOpenSettings, title }) {
+export default function Sidebar({ chats, activeId, open, onPick, onNew, onOpenSettings, onHome, title }) {
   return (
     <aside className={'sidebar' + (open ? ' open' : '')}>
-      <div className="brand">
-        <div className="brand-mark">
+      <button type="button" className="brand" onClick={onHome} aria-label="回到首页">
+        <span className="brand-mark">
           <HouseIcon />
-        </div>
+        </span>
         <span className="brand-name">{title}</span>
-      </div>
+      </button>
 
       <button type="button" className="new-chat" onClick={onNew}>
         <PlusIcon />
