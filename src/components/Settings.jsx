@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { isDiskPath, resolveSrc } from '../hooks/useSettings.js'
+import { isDiskPath, resolveSrc, THEMES } from '../hooks/useSettings.js'
 import { CloseIcon } from './Icons.jsx'
 import ProvidersEditor from './ProvidersEditor.jsx'
 
@@ -73,6 +73,9 @@ export default function Settings({ settings, update, reset, models, onModelsChan
           </button>
           <button type="button" role="tab" className="tab" aria-selected={tab === 'api'} onClick={() => setTab('api')}>
             接口与密钥
+          </button>
+                    <button type="button" role="tab" className="tab" aria-selected={tab === 'style'} onClick={() => setTab('style')}>
+            风格
           </button>
         </div>
 
@@ -205,6 +208,27 @@ export default function Settings({ settings, update, reset, models, onModelsChan
         {tab === 'api' && (
           <ProvidersEditor models={models} accessCode={settings.accessCode} onChanged={onModelsChanged} />
         )}
+                {tab === 'style' && (
+          <section className="section">
+            <div className="section-title">界面风格</div>
+            <div className="theme-grid">
+              {THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={'theme-card' + (settings.theme === t.id ? ' selected' : '')}
+                  aria-pressed={settings.theme === t.id}
+                  onClick={() => update({ theme: t.id })}
+                >
+                  <span className="theme-swatch" style={{ background: t.colors[0] }}>
+                    <span style={{ background: t.colors[1] }} />
+                  </span>
+                  <span>{t.name}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         <div className="modal-foot">
           {tab === 'basic' && (
@@ -218,7 +242,7 @@ export default function Settings({ settings, update, reset, models, onModelsChan
               </button>
             </>
           )}
-          {tab === 'api' && <span className="spacer" />}
+          {tab !== 'basic' && <span className="spacer" />}
           <button type="button" className="btn btn-primary" onClick={onClose}>
             完成
           </button>

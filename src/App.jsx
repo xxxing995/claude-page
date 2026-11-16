@@ -9,6 +9,9 @@ import { streamChat, deleteMessage, retractRound, listModels } from './api.js'
 
 export default function App() {
   const { settings, update, reset } = useSettings()
+    useEffect(() => {
+    document.documentElement.dataset.theme = settings.theme || 'rose'
+  }, [settings.theme])
 
   // 开场动画
   const [splash, setSplash] = useState(settings.splashEnabled ? 1 : 0)

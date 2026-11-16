@@ -12,7 +12,13 @@ export const DEFAULTS = {
   fadeSeconds: 2, // 渐隐时间（1–3 秒）
   iconSize: 120,
   accessCode: '',
+  theme: 'rose',
 }
+
+export const THEMES = [
+  { id: 'rose', name: '暖粉', colors: ['#f8f5f2', '#f0d5d8'] },
+  { id: 'cream', name: '奶白橘', colors: ['#faf9f5', '#d97757'] },
+]
 
 function load() {
   try {
@@ -34,7 +40,7 @@ export function useSettings() {
   }, [settings])
 
   const update = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), [])
-  const reset = useCallback(() => setSettings((s) => ({ ...DEFAULTS, accessCode: s.accessCode })), [])
+  const reset = useCallback(() => setSettings((s) => ({ ...DEFAULTS, accessCode: s.accessCode, theme: s.theme })), [])
 
   return { settings, update, reset }
 }
